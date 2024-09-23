@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Task Manager</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <h1>Task Manager</h1>
+    <form id="task-form">
+        <input type="text" id="task-title" placeholder="Task Title" required>
+        <input type="date" id="task-date">
+        <input type="time" id="task-time">
+        <input type="text" id="task-description" placeholder="Description">
+        <button type="submit">Add Task</button>
+    </form>
+    <ul id="list"></ul>
+    <script>
+        const taskForm = document.getElementById('task-form');
+        const taskList = document.getElementById('list');
+        let currentEditId = null;
+
+        async function fetchTasks() {
+            const response = await fetch('/tasks');
+            if (response.ok) {
+                const tasks = await response.json();
+                taskList.innerHTML = ''; // Clear the current list
+                const sortedTasks = tasks.data.sort((a, b) => {
+                    // Sort by completion status
+                    return a.is_finished - b.is_finished;
+                });
+                sortedTasks.forEach(task => addTaskToList(task));
+            } else {
+                console.error('Failed to fetch tasks.');
+            }
+        }
+
+        taskForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const taskTitle = document.getElementById('task-title').value;
+            const taskDate = document.getElementById('task-date').value;
+            const taskTime = document.getElementById('task-time').value || '00:00';
+            const taskDescription = document.getElementById('task-description').value;
+
+            if (currentEditId) {
+                const response = await fetch(`/task/${currentEditId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        task: taskTitle,
+                        date: `${taskDate}T${taskTime}`,
+                        description: taskDescription,
+                    }),
+                });
+
+                if (response.ok) {
+                    await fetchTasks();
+                    resetForm();
+                } else {
+                    alert('Failed to update task.');
+                }
+            } else {
+                const response = await fetch('/task', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        task: taskTitle,
+                        date: `${taskDate}T${taskTime}`,
+                        description: taskDescription,
+                    }),
+                });
+
+                if (response.ok) {
+                    await fetchTasks();
+                    resetForm();
+                } else {
+                    alert('Failed to add task.');
+                }
+            }
+        });
+
+        function addTaskToList(task) {
+            const li = document.createElement('li');
+            li.className = 'task-item';
+            li.dataset.id = task.id;
+            li.innerHTML = `
+                <input type="checkbox" class="task-status-checkbox" ${task.is_finished ? 'checked' : ''} onchange="toggleCompletion(${task.id}, this.checked)">
+                <span class="task-date">${new Date(task.date).toLocaleDateString()}</span>
+                <span class="task-time">${new Date(task.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                <span class="task-title" id="task-title-${task.id}">${task.task}</span>
+                <span class="task-description" id="task-desc-${task.id}">${task.description || 'No description'}</span>
+                <button onclick="startEdit(${task.id})">Edit</button>
+                <button style="margin-left: 8px;" onclick="deleteTask(${task.id})">Delete</button>
+                <div id="edit-fields-${task.id}" style="display: none;">
+                    <input type="text" id="edit-title-${task.id}" value="${task.task}">
+                    <input type="text" id="edit-desc-${task.id}" value="${task.description || ''}">
+                    <input type="date" id="edit-date-${task.id}" value="${new Date(task.date).toISOString().split('T')[0]}">
+                    <input type="time" id="edit-time-${task.id}" value="${new Date(task.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }).slice(0, 5)}">
+                    <button onclick="saveEdit(${task.id})">Save</button>
+                    <button onclick="cancelEdit(${task.id})">Cancel</button>
+                </div>
+            `;
+            taskList.appendChild(li);
+        }
+
+        function startEdit(taskId) {
+            document.getElementById(`edit-fields-${taskId}`).style.display = 'block';
+            document.getElementById(`task-title-${taskId}`).style.display = 'none';
+            document.getElementById(`task-desc-${taskId}`).style.display = 'none';
+            currentEditId = taskId; // Set the current edit ID
+        }
+
+        async function saveEdit(taskId) {
+            const title = document.getElementById(`edit-title-${taskId}`).value;
+            const description = document.getElementById(`edit-desc-${taskId}`).value;
+            const date = document.getElementById(`edit-date-${taskId}`).value;
+            const time = document.getElementById(`edit-time-${taskId}`).value || '00:00';
+
+            const response = await fetch(`/task/${taskId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    task: title,
+                    date: `${date}T${time}`,
+                    description: description,
+                }),
+            });
+
+            if (response.ok) {
+                await fetchTasks();
+                resetForm();
+            } else {
+                alert('Failed to update task.');
+            }
+        }
+
+        function cancelEdit(taskId) {
+            document.getElementById(`edit-fields-${taskId}`).style.display = 'none';
+            document.getElementById(`task-title-${taskId}`).style.display = 'inline';
+            document.getElementById(`task-desc-${taskId}`).style.display = 'inline';
+            currentEditId = null; // Clear the current edit ID
+        }
+
+        async function toggleCompletion(taskId, isFinished) {
+            // Fetch current task data
+            const response = await fetch(`/task/${taskId}`);
+            if (response.ok) {
+                const task = await response.json();
+
+                // Send only the completion status without altering other data
+                const updateResponse = await fetch(`/task/${taskId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        is_finished: isFinished,
+                        task: task.data.task, // Retain original task title
+                        date: task.data.date, // Retain original date
+                        description: task.data.description // Retain original description
+                    }),
+                });
+
+                if (updateResponse.ok) {
+                    await fetchTasks(); // Refresh the task list
+                } else {
+                    alert('Failed to update completion status.');
+                }
+            }
+        }
+
+        async function deleteTask(taskId) {
+            const response = await fetch(`/task/${taskId}`, {
+                method: 'DELETE',
+            });
+
+            if (response.ok) {
+                await fetchTasks(); // Refresh the task list
+            } else {
+                alert('Failed to delete task.');
+            }
+        }
+
+        function resetForm() {
+            currentEditId = null;
+            taskForm.reset();
+        }
+
+        // Fetch tasks when the page loads
+        fetchTasks();
+    </script>
+</body>
+</html>
